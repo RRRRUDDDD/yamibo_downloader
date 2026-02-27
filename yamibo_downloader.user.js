@@ -14,6 +14,7 @@
 // @grant        GM_setValue
 // @grant        GM_getValue
 // @connect      *
+// @license MIT
 // ==/UserScript==
 
 (function() {
