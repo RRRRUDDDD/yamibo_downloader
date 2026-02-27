@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         百合会下载器
 // @namespace    https://github.com/RRRRUDDDD/yamibo_downloader
-// @version      1.2
+// @version      1.5
 // @description  用于下载百合会的小说与漫画，下载格式可选epub与txt
 // @author       RUD
 // @match        *://bbs.yamibo.com/thread-*
@@ -9,8 +9,6 @@
 // @match        *://bbs.yamibo.com/misc.php?mod=tag*
 // @require      https://cdn.jsdelivr.net/npm/fflate@0.8.2/umd/index.js
 // @grant        GM_xmlhttpRequest
-// @grant        GM_registerMenuCommand
-// @grant        GM_unregisterMenuCommand
 // @grant        GM_setValue
 // @grant        GM_getValue
 // @connect      *
@@ -21,24 +19,7 @@
     'use strict';
 
     const FORMATS = ['EPUB', 'TXT', 'BOTH'];
-    const FORMAT_NAMES = { 'EPUB': '仅 EPUB', 'TXT': '仅 TXT', 'BOTH': 'EPUB + TXT' };
     let currentFormat = GM_getValue('downloadFormat', 'EPUB');
-    let menuCmdId = null;
-
-    function registerMenu() {
-        if (typeof GM_registerMenuCommand === 'undefined') return;
-        if (menuCmdId !== null && typeof GM_unregisterMenuCommand !== 'undefined') {
-            GM_unregisterMenuCommand(menuCmdId);
-        }
-        menuCmdId = GM_registerMenuCommand(`⚙️ 切换下载格式 (当前: ${FORMAT_NAMES[currentFormat]})`, () => {
-            let nextIdx = (FORMATS.indexOf(currentFormat) + 1) % FORMATS.length;
-            currentFormat = FORMATS[nextIdx];
-            GM_setValue('downloadFormat', currentFormat);
-            registerMenu();
-            alert(`✅ 已切换下载格式为: ${FORMAT_NAMES[currentFormat]}`);
-        });
-    }
-    registerMenu();
 
     // ==========================================
     // css设定
@@ -835,6 +816,69 @@ sup {
         let links = [];
         let threadTitle = '';
 
+        // 提取楼主楼层抓取逻辑为独立函数，以便复用
+        async function fetchOPFloorsHelper() {
+            let opLinks = [];
+            try {
+                const firstPostDiv = document.querySelector('#postlist > div[id^="post_"]');
+                const opAuthLink = firstPostDiv ? firstPostDiv.querySelector('.authi a') : null;
+                const tidMatch = window.location.href.match(/tid=(\d+)/) || window.location.href.match(/thread-(\d+)/);
+
+                if (opAuthLink && tidMatch) {
+                    const uidMatch = opAuthLink.getAttribute('href').match(/uid[=-](\d+)/);
+                    const tid = tidMatch[1];
+                    if (uidMatch) {
+                        const opUid = uidMatch[1];
+                        let curPage = 1;
+                        let maxPage = 1;
+
+                        while (curPage <= maxPage) {
+                            const pageUrl = window.location.origin + `/forum.php?mod=viewthread&tid=${tid}&page=${curPage}&authorid=${opUid}`;
+                            const res = await fetch(pageUrl);
+                            const htmlText = await res.text();
+                            const doc = new DOMParser().parseFromString(htmlText, 'text/html');
+
+                            if (curPage === 1) {
+                                const pg = doc.querySelector('.pg');
+                                if (pg) {
+                                    const pgs = pg.querySelectorAll('a');
+                                    pgs.forEach(a => {
+                                        const href = a.getAttribute('href') || '';
+                                        const m = href.match(/page=(\d+)/);
+                                        if (m && parseInt(m[1], 10) > maxPage) maxPage = parseInt(m[1], 10);
+                                    });
+                                    const pgLabel = pg.querySelector('label span');
+                                    if (pgLabel && pgLabel.title) {
+                                        const m = pgLabel.title.match(/共\s*(\d+)\s*页/);
+                                        if (m && parseInt(m[1], 10) > maxPage) maxPage = parseInt(m[1], 10);
+                                    }
+                                }
+                            }
+
+                            const posts = doc.querySelectorAll('#postlist > div[id^="post_"]');
+                            posts.forEach(post => {
+                                const pid = post.id.replace('post_', '');
+                                const floorNode = post.querySelector('a[id^="postnum"]');
+                                let floorName = `楼层 ${pid}`;
+                                if (floorNode) {
+                                    floorName = floorNode.innerText.trim().replace(/[\r\n]/g, '');
+                                }
+                                opLinks.push({
+                                    url: window.location.origin + `/forum.php?mod=viewthread&tid=${tid}&pid=${pid}#pid${pid}`,
+                                    title: floorName
+                                });
+                            });
+                            curPage++;
+                            await new Promise(resolve => setTimeout(resolve, 300)); // 延迟防拦截
+                        }
+                    }
+                }
+            } catch(err) {
+                console.error('获取楼主楼层失败', err);
+            }
+            return opLinks;
+        }
+
         if (mode === 'thread') {
             const firstPost = document.querySelector('.t_f');
             if (!firstPost) { alert('❌ 未能定位到一楼内容！'); resetButton(btn, mode); return; }
@@ -844,6 +888,12 @@ sup {
             });
             links = rawLinks.map(a => ({ url: a.href, title: a.innerText.trim() }));
             threadTitle = document.querySelector('#thread_subject').innerText.trim();
+
+            if (links.length === 0) {
+                btn.innerText = '🔍 未检测到链接，正在扫描楼主全部楼层...';
+                links = await fetchOPFloorsHelper();
+            }
+
         } else if (mode === 'tag') {
             const rawLinks = Array.from(document.querySelectorAll('a')).filter(a => {
                 const href = a.getAttribute('href') || '';
@@ -864,8 +914,132 @@ sup {
             threadTitle = tagMatch ? tagMatch[1].trim() : '标签合集';
         }
 
-        if (links.length === 0) { alert('❌ 没有找到有效的帖子链接！'); resetButton(btn, mode); return; }
+        if (links.length === 0) { alert('❌ 没有找到有效的帖子链接，且抓取楼主楼层失败！'); resetButton(btn, mode); return; }
         threadTitle = threadTitle.replace(/[\\/:*?"<>|]/g, '');
+
+        const userSelection = await new Promise((resolve) => {
+            const overlay = document.createElement('div');
+            overlay.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.5);z-index:10000;display:flex;align-items:center;justify-content:center;font-family:sans-serif;';
+
+            const modal = document.createElement('div');
+            modal.style.cssText = 'background:#fff;padding:20px;border-radius:8px;width:80%;max-width:600px;max-height:80vh;display:flex;flex-direction:column;box-shadow:0 4px 15px rgba(0,0,0,0.2);color:#333;';
+
+            const title = document.createElement('h3');
+            title.innerText = '请选择要下载的格式与章节';
+            title.style.cssText = 'margin-top:0;margin-bottom:15px;border-bottom:1px solid #eee;padding-bottom:10px;text-align:center;';
+            modal.appendChild(title);
+
+            const formatDiv = document.createElement('div');
+            formatDiv.style.cssText = 'margin-bottom:15px;font-size:15px;';
+            const isEpub = currentFormat === 'EPUB' ? 'checked' : '';
+            const isTxt = currentFormat === 'TXT' ? 'checked' : '';
+            const isBoth = currentFormat === 'BOTH' ? 'checked' : '';
+            formatDiv.innerHTML = `
+                <strong style="margin-right:10px;">下载格式：</strong>
+                <label style="cursor:pointer;"><input type="radio" name="dl_format" value="EPUB" ${isEpub || (!isTxt && !isBoth ? 'checked' : '')}> EPUB</label>
+                <label style="margin-left:15px;cursor:pointer;"><input type="radio" name="dl_format" value="TXT" ${isTxt}> TXT</label>
+                <label style="margin-left:15px;cursor:pointer;"><input type="radio" name="dl_format" value="BOTH" ${isBoth}> EPUB + TXT</label>
+            `;
+            modal.appendChild(formatDiv);
+
+            const ctrlDiv = document.createElement('div');
+            ctrlDiv.style.cssText = 'margin-bottom:10px;';
+            ctrlDiv.innerHTML = `
+                <button id="btn-sel-all" style="margin-right:10px;padding:4px 10px;cursor:pointer;border:1px solid #ccc;border-radius:4px;background:#f9f9f9;">全选</button>
+                <button id="btn-sel-inv" style="padding:4px 10px;cursor:pointer;border:1px solid #ccc;border-radius:4px;background:#f9f9f9;">反选</button>
+            `;
+            modal.appendChild(ctrlDiv);
+
+            const listDiv = document.createElement('div');
+            listDiv.style.cssText = 'flex:1;overflow-y:auto;border:1px solid #ccc;padding:10px;margin-bottom:15px;border-radius:4px;background:#fafafa;';
+            links.forEach((link, idx) => {
+                const lbl = document.createElement('label');
+                lbl.style.cssText = 'display:block;margin-bottom:8px;cursor:pointer;word-break:break-all;';
+                lbl.innerHTML = `<input type="checkbox" class="chap-cb" value="${idx}" checked> <span style="margin-left:5px;">${idx + 1}. ${escapeXML(link.title)}</span>`;
+                listDiv.appendChild(lbl);
+            });
+            modal.appendChild(listDiv);
+
+            // 按钮容器修改为左右分布
+            const btnDiv = document.createElement('div');
+            btnDiv.style.cssText = 'display:flex; justify-content:space-between; align-items:center;';
+
+            // 左侧按钮（获取楼主全部楼层，仅在 thread 模式下显示）
+            const leftBtnDiv = document.createElement('div');
+            if (mode === 'thread') {
+                const fetchOpBtn = document.createElement('button');
+                fetchOpBtn.innerText = '没有想要的？获取楼主全部楼层';
+                fetchOpBtn.style.cssText = 'padding:8px 15px;cursor:pointer;border:1px solid #ccc;border-radius:4px;background:#f0f0f0;font-weight:bold;color:#333;';
+                fetchOpBtn.onclick = async () => {
+                    fetchOpBtn.innerText = '🔍 获取中...';
+                    fetchOpBtn.disabled = true;
+                    const opLinks = await fetchOPFloorsHelper();
+                    if (opLinks.length > 0) {
+                        links = opLinks; // 更新外部的 links 数组
+                        listDiv.innerHTML = ''; // 清空原有列表
+                        links.forEach((link, idx) => {
+                            const lbl = document.createElement('label');
+                            lbl.style.cssText = 'display:block;margin-bottom:8px;cursor:pointer;word-break:break-all;';
+                            lbl.innerHTML = `<input type="checkbox" class="chap-cb" value="${idx}" checked> <span style="margin-left:5px;">${idx + 1}. ${escapeXML(link.title)}</span>`;
+                            listDiv.appendChild(lbl);
+                        });
+                        fetchOpBtn.innerText = '✅ 已切换为楼主楼层';
+                    } else {
+                        fetchOpBtn.innerText = '❌ 获取失败';
+                        fetchOpBtn.disabled = false;
+                    }
+                };
+                leftBtnDiv.appendChild(fetchOpBtn);
+            }
+            btnDiv.appendChild(leftBtnDiv);
+
+            // 右侧按钮（取消、确认提取）
+            const rightBtnDiv = document.createElement('div');
+            const cancelBtn = document.createElement('button');
+            cancelBtn.innerText = '取消下载';
+            cancelBtn.style.cssText = 'margin-right:10px;padding:8px 20px;cursor:pointer;border:1px solid #ccc;border-radius:4px;background:#fff;';
+            cancelBtn.onclick = () => { document.body.removeChild(overlay); resolve(null); };
+
+            const confirmBtn = document.createElement('button');
+            confirmBtn.innerText = '确认提取';
+            confirmBtn.style.cssText = 'padding:8px 20px;cursor:pointer;background-color:#ff6699;color:white;border:none;border-radius:4px;font-weight:bold;';
+            confirmBtn.onclick = () => {
+                const format = document.querySelector('input[name="dl_format"]:checked').value;
+                const selectedIdxs = Array.from(document.querySelectorAll('.chap-cb:checked')).map(cb => parseInt(cb.value));
+                document.body.removeChild(overlay);
+                resolve({ format, selectedIdxs });
+            };
+
+            rightBtnDiv.appendChild(cancelBtn);
+            rightBtnDiv.appendChild(confirmBtn);
+            btnDiv.appendChild(rightBtnDiv);
+
+            modal.appendChild(btnDiv);
+            overlay.appendChild(modal);
+            document.body.appendChild(overlay);
+
+            document.getElementById('btn-sel-all').onclick = () => {
+                document.querySelectorAll('.chap-cb').forEach(cb => cb.checked = true);
+            };
+            document.getElementById('btn-sel-inv').onclick = () => {
+                document.querySelectorAll('.chap-cb').forEach(cb => cb.checked = !cb.checked);
+            };
+        });
+
+        if (!userSelection) {
+            resetButton(btn, mode);
+            return;
+        }
+
+        if (userSelection.selectedIdxs.length === 0) {
+            alert('❌ 必须至少选择一个章节！');
+            resetButton(btn, mode);
+            return;
+        }
+
+        currentFormat = userSelection.format;
+        GM_setValue('downloadFormat', currentFormat);
+        links = userSelection.selectedIdxs.map(idx => links[idx]);
 
         const chapters = [];
         const imageRegistry = [];
@@ -997,7 +1171,7 @@ sup {
                                 attachContent += parseToParagraphs(wrapper);
                             }
                         });
-                        if (attachContent) chapterContent += `<div class="s-hr1"></div>${attachContent}`;
+                        if (attachContent) chapterContent += `${attachContent}`; 
                     }
                 }
 
