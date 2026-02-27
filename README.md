@@ -9,7 +9,7 @@
 
 | Greasy Fork | GitHub 源 | jsDelivr 源 |
 | --- | --- | --- |
-| [安装](https://greasyfork.org/zh-CN/scripts/567671-%E7%99%BE%E5%90%88%E4%BC%9A%E4%B8%8B%E8%BD%BD%E5%99%A8) | [安装](https://raw.githubusercontent.com/RRRRUDDDD/yamibo_downloader/main/yamibo_downloader.user.js) | [安装](https://www.google.com/search?q=https://cdn.jsdelivr.net/gh/RRRRUDDDD/yamibo_downloader%40main/yamibo_downloader.user.js) |
+| [安装](https://greasyfork.org/zh-CN/scripts/567671-%E7%99%BE%E5%90%88%E4%BC%9A%E4%B8%8B%E8%BD%BD%E5%99%A8) | [安装](https://raw.githubusercontent.com/RRRRUDDDD/yamibo_downloader/main/yamibo_downloader.user.js) | [安装](https://cdn.jsdelivr.net/gh/RRRRUDDDD/yamibo_downloader@main/yamibo_downloader.user.js)) |
 
 
 1. 进入百合会任意带有超链接目录的一楼帖子页面。
