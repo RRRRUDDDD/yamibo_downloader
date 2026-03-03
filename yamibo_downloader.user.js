@@ -13,6 +13,8 @@
 // @grant        GM_getValue
 // @connect      *
 // @license      MIT
+// @downloadURL https://update.greasyfork.org/scripts/567671/%E7%99%BE%E5%90%88%E4%BC%9A%E4%B8%8B%E8%BD%BD%E5%99%A8.user.js
+// @updateURL https://update.greasyfork.org/scripts/567671/%E7%99%BE%E5%90%88%E4%BC%9A%E4%B8%8B%E8%BD%BD%E5%99%A8.meta.js
 // ==/UserScript==
 
 (function() {
@@ -864,7 +866,7 @@ sup {
                                     floorName = floorNode.innerText.trim().replace(/[\r\n]/g, '');
                                 }
                                 opLinks.push({
-                                    url: window.location.origin + `/forum.php?mod=viewthread&tid=${tid}&pid=${pid}#pid${pid}`,
+                                    url: window.location.origin + `/forum.php?mod=viewthread&tid=${tid}&page=${curPage}&authorid=${opUid}&pid=${pid}#pid${pid}`,
                                     title: floorName
                                 });
                             });
@@ -1051,7 +1053,7 @@ sup {
 
             function traverse(node) {
                 if (node.nodeType === Node.TEXT_NODE) {
-                    let text = escapeXML(node.textContent).replace(/[\r\n]+/g, '');
+                    let text = escapeXML(node.textContent.replace(/&/g, '＆')).replace(/[\r\n]+/g, '');
                     currentParagraph += text;
                 } else if (node.nodeType === Node.ELEMENT_NODE) {
                     const tag = node.tagName.toUpperCase();
@@ -1095,7 +1097,7 @@ sup {
                         return;
                     }
 
-                    if (['B', 'STRONG', 'RUBY', 'RT', 'SPAN', 'FONT'].includes(tag)) {
+                    if (['B', 'STRONG', 'RUBY', 'RT', 'SPAN'].includes(tag)) {
                         let before = currentParagraph;
                         currentParagraph = '';
                         Array.from(node.childNodes).forEach(traverse);
@@ -1150,9 +1152,22 @@ sup {
 
                 if (pidMatch && pidMatch[1]) {
                     const msgNode = doc.getElementById('postmessage_' + pidMatch[1]);
-                    if (msgNode) pcbNode = msgNode.closest('.pcb');
+                    if (msgNode) {
+                        pcbNode = msgNode.closest('.pcb');
+                    } else {
+                        const postDiv = doc.getElementById('post_' + pidMatch[1]);
+                        if (postDiv) pcbNode = postDiv.querySelector('.pcb');
+                    }
                 }
-                if (!pcbNode) pcbNode = doc.querySelector('.pcb');
+
+                if (!pcbNode) {
+                    const allPosts = doc.querySelectorAll('#postlist > div[id^="post_"]');
+                    if (allPosts.length > 1 && url.includes('page=') && !url.includes('page=1')) {
+                        pcbNode = allPosts[1].querySelector('.pcb') || doc.querySelector('.pcb');
+                    } else {
+                        pcbNode = doc.querySelector('.pcb');
+                    }
+                }
 
                 let chapterContent = '';
                 if (pcbNode) {
@@ -1202,6 +1217,9 @@ sup {
 
         btn.innerText = '📦 正在打包中...';
         setTimeout(() => {
+            threadTitle = threadTitle.replace(/&/g, '＆');
+            chapters.forEach(ch => ch.title = ch.title.replace(/&/g, '＆'));
+
             if (currentFormat === 'TXT' || currentFormat === 'BOTH') {
                 generateTXT(threadTitle, chapters);
             }
@@ -1225,7 +1243,7 @@ sup {
 
         function domToBbcode(node) {
             if (node.nodeType === Node.TEXT_NODE) {
-                return node.textContent;
+                return node.textContent.replace(/&/g, '＆');
             }
             if (node.nodeType === Node.ELEMENT_NODE) {
                 let tag = node.tagName.toUpperCase();
