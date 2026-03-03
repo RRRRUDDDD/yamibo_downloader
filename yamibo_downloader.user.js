@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         百合会下载器
 // @namespace    https://github.com/RRRRUDDDD/yamibo_downloader
-// @version      1.5
+// @version      1.6
 // @description  用于下载百合会的小说与漫画，下载格式可选epub与txt
 // @author       RUD
 // @match        *://bbs.yamibo.com/thread-*
